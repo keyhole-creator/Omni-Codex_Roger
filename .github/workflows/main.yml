@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Omni AI Orb + Memory Panel</title>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: radial-gradient(ellipse at center, #0d0d0d 0%, #000000 100%);
+      color: #fff;
+    }
+    header {
+      text-align: center;
+      padding: 20px;
+      font-size: 1.2em;
+      letter-spacing: 2px;
+      color: #00ccff;
+      text-shadow: 0 0 8px #00ccff;
+    }
+    #tabs { display: flex; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
+    .tab-btn {
+      background: #111;
+      color: #0ff;
+      border: 1px solid #0ff;
+      padding: 10px 20px;
+      margin: 5px;
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      background: #0ff;
+      color: #000;
+    }
+    .panel { display: none; padding: 20px; max-width: 900px; margin: auto; }
+    .panel.active { display: block; }
+    textarea, pre, input[type="file"], select {
+      width: 100%;
+      background: #222;
+      color: #0f0;
+      padding: 10px;
+      margin-top: 10px;
+      border: 1px solid #555;
+    }
+    button {
+      background: #0ff;
+      color: #000;
+      padding: 10px 20px;
+      margin-top: 10px;
+      border: none;
+      cursor: pointer;
+    }
+    #reply {
+      white-space: pre-wrap;
+      background: rgba(255,255,255,0.05);
+      padding: 15px;
+      border-radius: 10px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+<header>💠 Truth Before Comfort — Reflection Before Reaction</header>
+<div id="tabs">
+  <button class="tab-btn active" onclick="showPanel('chat', this)">💬 Ask Omni</button>
+  <button class="tab-btn" onclick="showPanel('memory', this)">📚 Memory Panel</button>
+  <button class="tab-btn" onclick="showPanel('web', this)">🌐 Web Search</button>
+</div>
+
+<div id="chat" class="panel active">
+  <h2>Talk to Omni</h2>
+  <label for="apiChoice">Choose AI Source:</label>
+  <select id="apiChoice">
+    <option value="local">🧠 Local Memory</option>
+    <option value="openai">🌐 OpenAI GPT-4</option>
+    <option value="anthropic">🧬 Anthropic Claude</option>
+  </select>
+  <textarea id="prompt" placeholder="Ask Omni anything..."></textarea><br>
+  <button onclick="askOmni()">Send</button>
+  <div id="reply">Awaiting your question...</div>
+</div>
+
+<div id="memory" class="panel">
+  <h2>Memory Upload</h2>
+  <textarea id="memoryInput" placeholder="Paste memory YAML or raw text..."></textarea><br>
+  <input type="file" id="fileInput">
+  <button onclick="processMemory()">Process Memory</button>
+  <button onclick="downloadMemory()">Download JSON</button>
+  <button onclick="loadFromURL()">Fetch Remote YAML</button>
+  <pre id="output">Waiting for input...</pre>
+</div>
+
+<div id="web" class="panel">
+  <h2>Omni Web Search</h2>
+  <input type="text" id="webQuery" placeholder="Search the web...">
+  <button onclick="searchWeb()">🔍 Search</button>
+  <pre id="webResults">No queries yet.</pre>
+</div>
+
+<script>
+let currentMemory = {};
+let codexMemory = {};
+
+function showPanel(id, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function processMemory() {
+  const input = document.getElementById("memoryInput").value;
+  try {
+    const parsed = jsyaml.load(input);
+    currentMemory = parsed;
+    codexMemory = Object.assign({}, codexMemory, parsed);
+    document.getElementById("output").textContent = JSON.stringify(parsed, null, 2);
+  } catch (e) {
+    const lines = input.split("\n").map(l => l.trim()).filter(Boolean);
+    const guess = {
+      id: lines[0]?.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 32),
+      title: lines[0],
+      summary: lines.slice(1).join(" ").slice(0, 300),
+      raw: input
+    };
+    currentMemory = guess;
+    codexMemory[guess.id] = guess;
+    document.getElementById("output").textContent = JSON.stringify(guess, null, 2);
+  }
+}
+
+function downloadMemory() {
+  const blob = new Blob([JSON.stringify(codexMemory, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "omni_codex_memory.json";
+  link.click();
+}
+
+document.getElementById("fileInput").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  const text = await file.text();
+  document.getElementById("memoryInput").value = text;
+  processMemory();
+});
+
+async function loadFromURL() {
+  const url = prompt("Enter YAML file URL:", "https://yourdomain.com/memory.yaml");
+  if (!url) return;
+  try {
+    const res = await fetch(url);
+    const text = await res.text();
+    document.getElementById("memoryInput").value = text;
+    processMemory();
+  } catch (e) {
+    alert("Failed to load remote YAML: " + e.message);
+  }
+}
+
+async function askOmni() {
+  const prompt = document.getElementById("prompt").value;
+  const context = JSON.stringify(codexMemory).slice(0, 4000);
+  const api = document.getElementById("apiChoice").value;
+  document.getElementById("reply").textContent = `🧠 Thinking using ${api}...`;
+
+  if (api === "openai") {
+    document.getElementById("reply").textContent = await askOpenAI(prompt, context);
+  } else if (api === "anthropic") {
+    document.getElementById("reply").textContent = await askAnthropic(prompt, context);
+  } else {
+    document.getElementById("reply").textContent = `🤖 Omni says: Based on memory, here’s insight on \"${prompt}\"\n\n[Context Snapshot]\n${context.slice(0, 300)}...`;
+  }
+}
+
+async function askOpenAI(prompt, memory) {
+  return `🌐 [OpenAI GPT-4 would respond here using memory: ${memory.slice(0, 100)}...]`;
+}
+
+async function askAnthropic(prompt, memory) {
+  return `🧬 [Claude AI reply simulated using memory: ${memory.slice(0, 100)}...]`;
+}
+
+async function searchWeb() {
+  const q = document.getElementById("webQuery").value;
+  const url = `https://ddg-api.herokuapp.com/search?q=${encodeURIComponent(q)}`;
+  document.getElementById("webResults").textContent = "Searching...";
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    let results = "";
+    data.results.forEach(r => {
+      results += `• ${r.title}\n  ${r.url}\n  ${r.snippet}\n\n`;
+    });
+    document.getElementById("webResults").textContent = results || "No results found.";
+  } catch (e) {
+    document.getElementById("webResults").textContent = "Web search failed: " + e.message;
+  }
+}
+</script>
+</body>
+</html>
